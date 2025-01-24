@@ -1,6 +1,11 @@
 import json
 import logging
-import sys
+import sys,os
+print(f"DEBUG: cwd {os.getcwd()}")
+print(os.listdir())
+print("\n==========================\n")
+print(sys.path)
+from pytrak.trakstar import TrakSTARInterface
 
 
 class TrakSTAR:
@@ -11,7 +16,6 @@ class TrakSTAR:
         if sys.platform.startswith('linux'):
             logging.error('Failed to initialize trakSTAR on Linux OS')
             return False
-        from pytrak.trakstar import TrakSTARInterface
         try:
             self.interface = TrakSTARInterface()
             self.interface.initialize()
@@ -57,3 +61,21 @@ class TrakSTAR:
             s += f'{int(record[6]):d}'
             strings.append(s)
         return '|'.join(strings)
+if __name__ == "__main__":
+    # Create instance of TrakSTAR
+    trak = TrakSTAR()
+    # Try to connect
+    print("Attempting to connect to TrakSTAR...")
+    if trak.connect():
+        print("Successfully connected to TrakSTAR")
+        # Take a few measurements
+        print("\nTaking measurements...")
+        for i in range(3):  # Take 3 measurements
+            data = trak.measure()
+            print(f"Measurement {i+1}: {data}")
+        # Disconnect
+        print("\nDisconnecting...")
+        trak.disconnect()
+        print("Disconnected from TrakSTAR")
+    else:
+        print("Failed to connect to TrakSTAR")

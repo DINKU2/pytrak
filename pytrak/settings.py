@@ -47,12 +47,14 @@ t_wait = 1500
 def save():
     config = configparser.RawConfigParser()
     config.add_section(cfg_section)
-    config.set(cfg_section, "measurement_rate", measurement_rate)
-    config.set(cfg_section, "max_range", max_range)
-    config.set(cfg_section, "report_rate", report_rate)
-    config.set(cfg_section, "power_line", power_line)
-    config.set(cfg_section, "metric", metric)
-    with open(cfg_filename, 'wb') as configfile:
+    config.set(cfg_section, "measurement_rate", str(measurement_rate))
+    config.set(cfg_section, "max_range", str(max_range))
+    config.set(cfg_section, "report_rate", str(report_rate))
+    config.set(cfg_section, "power_line", str(power_line))
+    config.set(cfg_section, "metric", str(int(metric)))  # Convert boolean to int for saving
+    
+    # Open the configuration file in text mode
+    with open(cfg_filename, 'w') as configfile:
         config.write(configfile)
 
 

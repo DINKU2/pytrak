@@ -20,13 +20,14 @@ udp_connection = None
 
 def logo_text_line(text):
     blank = stimuli.Canvas(size=(600, 400))
-    logo = stimuli.Picture(filename=os.path.join(os.path.dirname(__file__),
-                            "pytrak_logo.png"), position = (0, 150))
-    logo.scale(0.6)
-    stimuli.TextLine(text="Version " + __version__, position=(0,80),
-                     text_size = 14,
+    
+    # Removed the logo-related code
+    # Adding a placeholder for version text
+    stimuli.TextLine(text="Version " + __version__, position=(0, 80),
+                     text_size=14,
                      text_colour=misc.constants.C_EXPYRIMENT_ORANGE).plot(blank)
-    logo.plot(blank)
+                     
+    # Displaying the provided text
     stimuli.TextLine(text=text).plot(blank)
     return blank
 

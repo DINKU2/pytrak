@@ -1,6 +1,7 @@
 """TrakSTARInterface"""
 import threading
 from pytrak.trakstar import atc3dg_functions as api
+#import atc3dg_functions as api
 
 __author__ = 'Raphael Wallroth <rwallroth@uni-potsdam.de>, \
 Oliver Lindemann <oliver.lindemann@cognitive-psychology.eu>'
