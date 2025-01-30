@@ -12,6 +12,7 @@ from time import localtime, strftime, time
 import numpy as np
 from .udp_connection import UDPConnection
 
+# x,y,z,pitch,roll,elevation,quality,udp,cputime
 def data_dict2string(data_dict, angles=False, quality=False, times=True,
                 cpu_times=False, udp=True):
     txt = ""
