@@ -599,11 +599,22 @@ class Ui_MainWindow(object):
         y_mm = y * in2mm
         z_mm = z * in2mm
         
-        # Update the appropriate VTK object with coordinates in mm
+        # Set the tracker origin on the first reading
+        if self.tracker_origin is None:
+            self.tracker_origin = (x_mm, y_mm, z_mm)
+            print(f"Tracker origin set to: {self.tracker_origin}", flush=True)
+        
+        # Compute relative tracker position (offset from the initial origin)
+        rel_x = x_mm - self.tracker_origin[0]
+        rel_y = y_mm - self.tracker_origin[1]
+        rel_z = z_mm - self.tracker_origin[2]
+        relative_position = (rel_x, rel_y, rel_z)
+        
+        # Update the appropriate VTK object with relative coordinates in mm
         if hasattr(self, 'rc_vtk'):
-            self.rc_vtk.update_trackstar_position((x_mm, y_mm, z_mm))
+            self.rc_vtk.update_trackstar_position(relative_position)
         elif hasattr(self, 'sro_vtk'):
-            self.sro_vtk.update_trackstar_position((x_mm, y_mm, z_mm))
+            self.sro_vtk.update_trackstar_position(relative_position)
 
     def initialize_trackstar(self):
         print("Initializing TrackSTAR interface now...", flush=True)
@@ -612,15 +623,18 @@ class Ui_MainWindow(object):
             self.trakstar.initialize()
             print("TrackSTAR interface initialized successfully!", flush=True)  # Success print
             
+            # Initialize tracker_origin to None; it will be set on the first read
+            self.tracker_origin = None
+            
             self.trackstar_timer = QtCore.QTimer()
             self.trackstar_timer.timeout.connect(self.update_trackstar_position)
             self.trackstar_timer.start(50)
             print("TrackSTAR update timer started.", flush=True)  # Timer started print
 
-            # Add a timer to print tracker position every 5 seconds (5000 ms)
+            # Add a timer to print tracker position every 10 seconds (10000 ms)
             self.trackerPrintTimer = QtCore.QTimer()
             self.trackerPrintTimer.timeout.connect(self.print_tracker_position)
-            self.trackerPrintTimer.start(10000)  # 5000 milliseconds = 5 seconds
+            self.trackerPrintTimer.start(10000)
             print("Tracker print timer started.", flush=True)
         except Exception as e:
             print(f"Error initializing TrackSTAR: {str(e)}", flush=True)  # Error print
@@ -632,7 +646,15 @@ class Ui_MainWindow(object):
         x_mm = x * in2mm
         y_mm = y * in2mm
         z_mm = z * in2mm
-        print(f"Tracker Position (mm): x={x_mm} y={y_mm} z={z_mm}", flush=True)
+        
+        if self.tracker_origin is None:
+            relative_position = (x_mm, y_mm, z_mm)
+        else:
+            relative_position = (x_mm - self.tracker_origin[0],
+                                 y_mm - self.tracker_origin[1],
+                                 z_mm - self.tracker_origin[2])
+        
+        print(f"Relative Tracker Position (mm): {relative_position}", flush=True)
 
 def find_center_and_spawn_dot(vtk_data, renderer, vtk_obj):
     print("Starting find_center_and_spawn_dot")
