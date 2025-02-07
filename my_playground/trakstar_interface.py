@@ -1,6 +1,6 @@
 """TrakSTARInterface"""
 import threading
-from my_playground import atc3dg_functions as api
+import atc3dg_functions as api
 #import atc3dg_functions as api
 
 __author__ = 'Raphael Wallroth <rwallroth@uni-potsdam.de>, \
@@ -10,11 +10,11 @@ import os
 import ctypes
 from time import localtime, strftime, time
 import numpy as np
-from ..pytrak.trakstar.udp_connection import UDPConnection
+#from udp_connection import UDPConnection
 
 # x,y,z,pitch,roll,elevation,quality,udp,cputime
 def data_dict2string(data_dict, angles=False, quality=False, times=True,
-                cpu_times=False, udp=True):
+                cpu_times=False, udp=False):
     txt = ""
     for sensor in range(1, 5):
         if sensor in data_dict:
@@ -62,7 +62,7 @@ class TrakSTARInterface(object):
         self._file = None
         self._write_quality = None
         self._write_angles = None
-        self._write_udp = None
+        #self._write_udp = None
 
         self.filename = None
         self.directory = None
@@ -71,8 +71,8 @@ class TrakSTARInterface(object):
         self.init_time = None
         self._is_init = False
 
-        self.udp = UDPConnection()
-        print(self.udp)
+        #self.udp = UDPConnection()
+        #print(self.udp)
 
     def __del__(self):
         self.close(ignore_error=True)
@@ -97,7 +97,7 @@ class TrakSTARInterface(object):
         self._write_angles = write_angles
         self._write_quality = write_quality
         self._write_cpu_times = write_cpu_times
-        self._write_udp = write_udp
+        #self._write_udp = write_udp
         if not os.path.isdir(directory):
             os.mkdir(directory)
         self.close_data_file()
@@ -192,7 +192,7 @@ class TrakSTARInterface(object):
         if error_code != 0:
             self._error_handler(error_code)
 
-        udp_data = self.udp.poll()
+        #udp_data = self.udp.poll()
 
         # convert2data_dict
         d = {}
@@ -215,16 +215,17 @@ class TrakSTARInterface(object):
                              self._record.a3, self._record.e3, self._record.r3,
                              self._record.quality3])
 
-        if udp_data is None:
-            d["udp"] = ""
-        else:
-            d["udp"] = udp_data
+        #if udp_data is None:
+        #    d["udp"] = ""
+        #else:
+        #    d["udp"] = udp_data
+
 
         if self._file is not None and write_data_file:
             self._file.write(data_dict2string(d,
                                angles=self._write_angles,
                                quality=self._write_quality,
-                               udp=self._write_udp,
+                               #udp=self._write_udp,
                                cpu_times=self._write_cpu_times) + "\n")
 
         return d

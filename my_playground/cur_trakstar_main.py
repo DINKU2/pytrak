@@ -4,9 +4,9 @@ from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QLa
 from PyQt6.QtCore import QTimer
 import vtkmodules.all as vtk
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-from pytrak.trakstar import TrakSTARInterface  # Replace with your TrakSTARInterface import
+from trakstar_interface import *  # Replace with your TrakSTARInterface import
 
-# i believe this is a single thread solution on vtk
+
 
 class ReceiverTracker(QMainWindow):
     def __init__(self, trakstar):

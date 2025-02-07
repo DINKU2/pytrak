@@ -8,7 +8,7 @@ Author: O. Lindemann
 import sys
 import ctypes
 
-from .atc3dg_types import *
+from atc3dg_types import *
 # from atc3dg_types import *
 
 
@@ -21,9 +21,8 @@ if sys.platform.startswith("linux"):
         dll_name = "/usr/lib/ATC3DGlib32.so"
 else:
     if ctypes.sizeof(ctypes.c_voidp) * 8 == 64:
-        dll_name = "C:/Users/Dinuk/Documents/DICOM-RT TrakStar Analysis+Visualization/WorkStart/TestingTrakStar/pytrak/ATC3DG64.DLL"
-    else:
-        dll_name = "ATC3DG.DLL"
+        dll_name = r"C:\Users\Dinuk\Documents\DICOM-RT TrakStar Analysis+Visualization\WorkStart\TestingTrakStar\pytrak\my_playground\ATC3DG64.DLL"
+        # dll_name = "ATC3DG.DLL"
 
 print("loading trakstar library {0}".format(dll_name))
 try:
