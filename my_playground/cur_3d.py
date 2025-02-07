@@ -593,12 +593,17 @@ class Ui_MainWindow(object):
     def update_trackstar_position(self):
         data = self.trakstar.get_synchronous_data_dict(write_data_file=False)
         x, y, z = data[1][:3]
+        # Convert inches to millimeters (1 in = 25.4 mm)
+        in2mm = 25.4
+        x_mm = x * in2mm
+        y_mm = y * in2mm
+        z_mm = z * in2mm
         
-        # Check which rendering mode we're in and update the appropriate VTK object
+        # Update the appropriate VTK object with coordinates in mm
         if hasattr(self, 'rc_vtk'):
-            self.rc_vtk.update_trackstar_position((x, y, z))
+            self.rc_vtk.update_trackstar_position((x_mm, y_mm, z_mm))
         elif hasattr(self, 'sro_vtk'):
-            self.sro_vtk.update_trackstar_position((x, y, z))
+            self.sro_vtk.update_trackstar_position((x_mm, y_mm, z_mm))
 
     def initialize_trackstar(self):
         print("Initializing TrackSTAR interface now...", flush=True)
@@ -611,8 +616,23 @@ class Ui_MainWindow(object):
             self.trackstar_timer.timeout.connect(self.update_trackstar_position)
             self.trackstar_timer.start(50)
             print("TrackSTAR update timer started.", flush=True)  # Timer started print
+
+            # Add a timer to print tracker position every 5 seconds (5000 ms)
+            self.trackerPrintTimer = QtCore.QTimer()
+            self.trackerPrintTimer.timeout.connect(self.print_tracker_position)
+            self.trackerPrintTimer.start(10000)  # 5000 milliseconds = 5 seconds
+            print("Tracker print timer started.", flush=True)
         except Exception as e:
             print(f"Error initializing TrackSTAR: {str(e)}", flush=True)  # Error print
+
+    def print_tracker_position(self):
+        data = self.trakstar.get_synchronous_data_dict(write_data_file=False)
+        x, y, z = data[1][:3]
+        in2mm = 25.4
+        x_mm = x * in2mm
+        y_mm = y * in2mm
+        z_mm = z * in2mm
+        print(f"Tracker Position (mm): x={x_mm} y={y_mm} z={z_mm}", flush=True)
 
 def find_center_and_spawn_dot(vtk_data, renderer, vtk_obj):
     print("Starting find_center_and_spawn_dot")
@@ -654,6 +674,7 @@ class vtk_W:
         self.frame = QtWidgets.QFrame()
         self.ren = vtk.vtkRenderer()  # Initialize the renderer here
         self.load_data()
+        self.create_3d_grid_fitted()  # Create a grid that fits the volume bounds
         self.renWin = 0
 
     def load_data(self):
@@ -661,6 +682,79 @@ class vtk_W:
         self.reader.SetDirectoryName(self.dirc)
         self.reader.Update()
         self.imageData = self.reader.GetOutput()
+
+    def create_3d_grid_fitted(self):
+        """
+        Create grid lines around the rendered volume.
+        The grid is built based on the bounds of self.imageData.
+        """
+        # Get the bounds: (xmin, xmax, ymin, ymax, zmin, zmax)
+        bounds = self.imageData.GetBounds()
+        xmin, xmax, ymin, ymax, zmin, zmax = bounds
+        print('sup buddy')
+        print(f"Bounds: {bounds}")
+
+        # Add a 5% margin to ensure the grid fully surrounds the volume
+        margin_x = 0.05 * (xmax - xmin)
+        margin_y = 0.05 * (ymax - ymin)
+        margin_z = 0.05 * (zmax - zmin)
+
+        xmin -= margin_x
+        xmax += margin_x
+        ymin -= margin_y
+        ymax += margin_y
+        zmin -= margin_z
+        zmax += margin_z
+
+        divisions = 10  # number of subdivisions along each axis
+        dx = (xmax - xmin) / divisions
+        dy = (ymax - ymin) / divisions
+        dz = (zmax - zmin) / divisions
+
+        # Create grid lines parallel to the X-axis (varying Y and Z)
+        for j in range(divisions + 1):
+            y_val = ymin + j * dy
+            for k in range(divisions + 1):
+                z_val = zmin + k * dz
+                line = vtk.vtkLineSource()
+                line.SetPoint1(xmin, y_val, z_val)
+                line.SetPoint2(xmax, y_val, z_val)
+                mapper = vtk.vtkPolyDataMapper()
+                mapper.SetInputConnection(line.GetOutputPort())
+                actor = vtk.vtkActor()
+                actor.SetMapper(mapper)
+                actor.GetProperty().SetColor(0.3, 0.3, 0.3)  # Light gray grid lines
+                self.ren.AddActor(actor)
+
+        # Create grid lines parallel to the Y-axis (varying X and Z)
+        for i in range(divisions + 1):
+            x_val = xmin + i * dx
+            for k in range(divisions + 1):
+                z_val = zmin + k * dz
+                line = vtk.vtkLineSource()
+                line.SetPoint1(x_val, ymin, z_val)
+                line.SetPoint2(x_val, ymax, z_val)
+                mapper = vtk.vtkPolyDataMapper()
+                mapper.SetInputConnection(line.GetOutputPort())
+                actor = vtk.vtkActor()
+                actor.SetMapper(mapper)
+                actor.GetProperty().SetColor(0.3, 0.3, 0.3)
+                self.ren.AddActor(actor)
+
+        # Create grid lines parallel to the Z-axis (varying X and Y)
+        for i in range(divisions + 1):
+            x_val = xmin + i * dx
+            for j in range(divisions + 1):
+                y_val = ymin + j * dy
+                line = vtk.vtkLineSource()
+                line.SetPoint1(x_val, y_val, zmin)
+                line.SetPoint2(x_val, y_val, zmax)
+                mapper = vtk.vtkPolyDataMapper()
+                mapper.SetInputConnection(line.GetOutputPort())
+                actor = vtk.vtkActor()
+                actor.SetMapper(mapper)
+                actor.GetProperty().SetColor(0.3, 0.3, 0.3)
+                self.ren.AddActor(actor)
 
     def surface_rendering(self):
         self.contour = vtk.vtkContourFilter()
