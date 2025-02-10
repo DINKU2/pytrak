@@ -17,6 +17,7 @@ import vtk
 from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor as qvtk
 from vtk.util import numpy_support # type: ignore
 from trakstar_interface import TrakSTARInterface
+import numpy as np
 
 
 class Ui_MainWindow(object):
@@ -468,6 +469,55 @@ class Ui_MainWindow(object):
 
         self.denisty_dic = {'skin1': 1, 'skin2': 100, 'tissue': 500, 'bones': 1000, 'dense bones': 1500}
 
+        # Add reference plane button to both tabs
+        self.sr_ref_plane_button = QtWidgets.QPushButton(self.sr_window_box)
+        self.sr_ref_plane_button.setGeometry(QtCore.QRect(430, 490, 301, 31))
+        self.sr_ref_plane_button.setStyleSheet("QPushButton {\n"
+                                             "    border: 2px solid rgb(51,51,51);\n"
+                                             "    border-radius: 5px;    \n"
+                                             "    color:rgb(255,255,255);\n"
+                                             "    background-color: rgb(51,51,51);\n"
+                                             "}\n"
+                                             "QPushButton:hover {\n"
+                                             "    border: 2px solid rgb(0,143,150);\n"
+                                             "    background-color: rgb(0,143,150);\n"
+                                             "}\n"
+                                             "QPushButton:pressed {    \n"
+                                             "    border: 2px solid rgb(0,143,150);\n"
+                                             "    background-color: rgb(51,51,51);\n"
+                                             "}")
+        self.sr_ref_plane_button.setObjectName("sr_ref_plane_button")
+        self.sr_ref_plane_button.setText("Set Reference Plane")
+        self.sr_ref_plane_button.clicked.connect(self.start_reference_collection)
+
+        self.rc_ref_plane_button = QtWidgets.QPushButton(self.tab_2)
+        self.rc_ref_plane_button.setGeometry(QtCore.QRect(20, 490, 750, 31))
+        self.rc_ref_plane_button.setStyleSheet("QPushButton {\n"
+                                             "    border: 2px solid rgb(51,51,51);\n"
+                                             "    border-radius: 5px;    \n"
+                                             "    color:rgb(255,255,255);\n"
+                                             "    background-color: rgb(51,51,51);\n"
+                                             "}\n"
+                                             "QPushButton:hover {\n"
+                                             "    border: 2px solid rgb(0,143,150);\n"
+                                             "    background-color: rgb(0,143,150);\n"
+                                             "}\n"
+                                             "QPushButton:pressed {    \n"
+                                             "    border: 2px solid rgb(0,143,150);\n"
+                                             "    background-color: rgb(51,51,51);\n"
+                                             "}")
+        self.rc_ref_plane_button.setObjectName("rc_ref_plane_button")
+        self.rc_ref_plane_button.setText("Set Reference Plane")
+        self.rc_ref_plane_button.clicked.connect(self.start_reference_collection)
+
+        # Initialize reference plane attributes
+        self.reference_points = []
+        self.collecting_reference = False
+        self.reference_timer = QtCore.QTimer()
+        self.reference_timer.timeout.connect(self.capture_reference_point)
+        self.transform_matrix = None
+        self.reference_origin = None
+
         self.retranslateUi(MainWindow)
         self.tabw.setCurrentIndex(1)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
@@ -507,6 +557,9 @@ class Ui_MainWindow(object):
             vtk_array = self.rc_vtk.imageData.GetPointData().GetScalars()
             numpy_data = numpy_support.vtk_to_numpy(vtk_array)
             numpy_data = numpy_data.reshape(dims, order='F')
+            
+            # Initialize trackstar ball with default position
+            self.rc_vtk.add_trackstar_ball(0, 0, 0)
             
             # Call find_center_and_spawn_dot which now handles both dots
             initial_position = find_center_and_spawn_dot(numpy_data, self.rc_vtk.ren, self.rc_vtk)
@@ -591,30 +644,30 @@ class Ui_MainWindow(object):
         self.tabw.setTabText(self.tabw.indexOf(self.tab_2), _translate("MainWindow", "Ray Casting Rendering"))
 
     def update_trackstar_position(self):
-        data = self.trakstar.get_synchronous_data_dict(write_data_file=False)
+        data = self.trakstar.get_synchronous_data_dict(write_data_file=False, unit="mm")
         x, y, z = data[1][:3]
-        # Convert inches to millimeters (1 in = 25.4 mm)
-        in2mm = 25.4
-        x_mm = x * in2mm
-        y_mm = y * in2mm
-        z_mm = z * in2mm
         
-        # Set the tracker origin on the first reading
+        # Set the tracker origin on the first reading if not set
         if self.tracker_origin is None:
-            self.tracker_origin = (x_mm, y_mm, z_mm)
+            self.tracker_origin = (x, y, z)
             print(f"Tracker origin set to: {self.tracker_origin}", flush=True)
+            return
         
-        # Compute relative tracker position (offset from the initial origin)
-        rel_x = x_mm - self.tracker_origin[0]
-        rel_y = y_mm - self.tracker_origin[1]
-        rel_z = z_mm - self.tracker_origin[2]
-        relative_position = (rel_x, rel_y, rel_z)
+        # First compute position relative to original tracker origin
+        current_pos = np.array([x - self.tracker_origin[0],
+                               y - self.tracker_origin[1],
+                               z - self.tracker_origin[2]])
         
-        # Update the appropriate VTK object with relative coordinates in mm
+        # Then apply reference plane transformation if available
+        if self.transform_matrix is not None:
+            # Transform the position relative to the original origin
+            current_pos = self.transform_matrix.T @ current_pos
+        
+        # Update the appropriate VTK object
         if hasattr(self, 'rc_vtk'):
-            self.rc_vtk.update_trackstar_position(relative_position)
+            self.rc_vtk.update_trackstar_position(tuple(current_pos))
         elif hasattr(self, 'sro_vtk'):
-            self.sro_vtk.update_trackstar_position(relative_position)
+            self.sro_vtk.update_trackstar_position(tuple(current_pos))
 
     def initialize_trackstar(self):
         print("Initializing TrackSTAR interface now...", flush=True)
@@ -640,23 +693,82 @@ class Ui_MainWindow(object):
             print(f"Error initializing TrackSTAR: {str(e)}", flush=True)  # Error print
 
     def print_tracker_position(self):
-        data = self.trakstar.get_synchronous_data_dict(write_data_file=False)
+        data = self.trakstar.get_synchronous_data_dict(write_data_file=False, unit="mm")
         x, y, z = data[1][:3]
-        in2mm = 25.4
-        x_mm = x * in2mm
-        y_mm = y * in2mm
-        z_mm = z * in2mm
         
         if self.tracker_origin is None:
-            relative_position = (x_mm, y_mm, z_mm)
+            relative_position = (x, y, z)
         else:
-            relative_position = (x_mm - self.tracker_origin[0],
-                                 y_mm - self.tracker_origin[1],
-                                 z_mm - self.tracker_origin[2])
+            relative_position = (x - self.tracker_origin[0],
+                                 y - self.tracker_origin[1],
+                                 z - self.tracker_origin[2])
         
-        print(f"Relative Tracker Position (mm): {relative_position}", flush=True)
+        print(f" {relative_position}", flush=True)
 
-def find_center_and_spawn_dot(vtk_data, renderer, vtk_obj):
+    def start_reference_collection(self):
+        """Start collecting reference points."""
+        self.reference_points = []
+        self.collecting_reference = True
+        print("Starting reference plane collection...", flush=True)
+        print("Collecting point 1 of 3...", flush=True)
+        self.reference_timer.start(1000)  # Timer fires every 1 second
+
+    def capture_reference_point(self):
+        """Capture reference points."""
+        if len(self.reference_points) >= 3:
+            self.reference_timer.stop()
+            self.collecting_reference = False
+            self.create_transform_matrix()
+            return
+
+        data = self.trakstar.get_synchronous_data_dict(write_data_file=False, unit="mm")
+        current_pos = np.array(data[1][:3])
+        self.reference_points.append(current_pos)
+        print(f"Collected point {len(self.reference_points)} of 3...", flush=True)
+        
+        if len(self.reference_points) == 3:
+            self.reference_timer.stop()
+            self.collecting_reference = False
+            self.create_transform_matrix()
+
+    def create_transform_matrix(self):
+        """Create transformation matrix from reference points."""
+        try:
+            p1, p2, p3 = self.reference_points
+
+            # Create vectors from points
+            v1 = p2 - p1  # First vector
+            v2 = p3 - p1  # Second vector
+            
+            # Calculate normal vector (new z-axis)
+            z_new = np.cross(v1, v2)
+            z_new = z_new / np.linalg.norm(z_new)
+            
+            # Calculate new x-axis (using v1 direction)
+            x_new = v1 / np.linalg.norm(v1)
+            
+            # Calculate new y-axis (perpendicular to both z and x)
+            y_new = np.cross(z_new, x_new)
+            
+            # Create rotation matrix
+            self.transform_matrix = np.vstack([x_new, y_new, z_new]).T
+            # Don't set a new reference origin, use the tracker_origin that was set initially
+            self.reference_origin = p1  # We still need this for the plane calculations
+            
+            print("Reference plane successfully created!", flush=True)
+            print(f"Using original tracker origin: {self.tracker_origin}", flush=True)
+            print(f"Transform matrix:\n{self.transform_matrix}", flush=True)
+        except Exception as e:
+            print(f"Error creating transform matrix: {e}", flush=True)
+            self.transform_matrix = None
+
+    def transform_point(self, point):
+        """Transform a point to the reference plane coordinate system."""
+        if self.transform_matrix is None or self.reference_origin is None:
+            return point
+        return self.transform_matrix.T @ (point - self.reference_origin)
+
+def find_center_and_spawn_dot(vtk_data, renderer, vtk_obj):  
     print("Starting find_center_and_spawn_dot")
     dims = vtk_data.shape
     print(f"Data dimensions: {dims}")

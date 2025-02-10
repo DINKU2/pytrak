@@ -44,7 +44,6 @@ def get_attached_sensors(data_dic):
     """return an array with the ids of attached sensors from a data dict"""
     return [x for x in [1,2,3,4] if x in data_dic]
 
-
 def copy_data_dict(old):
     """deep copy of the data dict"""
     new = old.copy()
@@ -140,7 +139,11 @@ class TrakSTARInterface(object):
         if self._file is not None:
             self._file.close()
 
-    def initialize(self):
+    def initialize(self, hemisphere="FRONT"):
+        """Initialize the trakSTAR system
+        Args:
+            hemisphere (str): Hemisphere setting ("FRONT", "BACK", "TOP", "BOTTOM", "LEFT", "RIGHT")
+        """
         if self.is_init:
             return
         print("* Initializing trakstar ...")
@@ -150,17 +153,35 @@ class TrakSTARInterface(object):
 
         transmitter_id = ctypes.c_ushort(0)
         api.SetSystemParameter(api.SystemParameterType.SELECT_TRANSMITTER,
-                               ctypes.pointer(transmitter_id), 2)
+                                ctypes.pointer(transmitter_id), 2)
 
         # read in System configuration
         self.read_configurations(print_configuration=True)
 
         # set sensors
         for x in range(self.system_configuration.numberSensors):
+            # Set data format
             api.SetSensorParameter(ctypes.c_ushort(x),
-                                   api.SensorParameterType.DATA_FORMAT,
-                ctypes.pointer(api.DataFormatType.DOUBLE_POSITION_ANGLES_TIME_Q),
-                                   4)
+                                    api.SensorParameterType.DATA_FORMAT,
+                                    ctypes.pointer(api.DataFormatType.DOUBLE_POSITION_ANGLES_TIME_Q),
+                                    4)
+            
+            # Set hemisphere - Fixed version
+            hemisphere_map = {
+                "FRONT": 0,
+                "BACK": 1,
+                "TOP": 2,
+                "BOTTOM": 3,
+                "LEFT": 4,
+                "RIGHT": 5
+            }
+            hemisphere_value = hemisphere_map.get(hemisphere.upper(), 0)  # Default to FRONT if invalid
+            hemisphere_param = ctypes.c_ushort(hemisphere_value)
+            api.SetSensorParameter(ctypes.c_ushort(x),
+                                 api.SensorParameterType.HEMISPHERE,
+                                 ctypes.pointer(hemisphere_param),
+                                 2)
+
         self.reset_timer()
         self._is_init = True
 
@@ -182,9 +203,12 @@ class TrakSTARInterface(object):
         self.close(ignore_error=True)
         raise RuntimeError("** trakSTAR Error")
 
-
-    def get_synchronous_data_dict(self, write_data_file=True):
-        """polling data"""
+    def get_synchronous_data_dict(self, write_data_file=True, unit="in"):
+        """polling data
+        Args:
+            write_data_file (bool): Whether to write data to file
+            unit (str): Measurement unit - "in" (inches), "cm" (centimeters), or "mm" (millimeters)
+        """
         error_code = api.GetSynchronousRecord(api.ALL_SENSORS,
                                               self._precord, 4 * 1 * 64)
         cpu_time = int((time() - self.init_time) * 1000)
@@ -192,40 +216,54 @@ class TrakSTARInterface(object):
         if error_code != 0:
             self._error_handler(error_code)
 
-        #udp_data = self.udp.poll()
+        # Set conversion factor based on desired unit
+        conversion_factor = {
+            "in": 1.0,      # no conversion needed
+            "cm": 2.54,     # inches to centimeters
+            "mm": 25.4      # inches to millimeters
+        }.get(unit.lower(), 1.0)  # default to inches if invalid unit
 
         # convert2data_dict
         d = {}
         d["time"] = trakstar_time
         d["cpu_time"] = cpu_time
         if 1 in self.attached_sensors:
-            d[1] = np.array([self._record.x0, self._record.y0, self._record.z0,
-                             self._record.a0, self._record.e0, self._record.r0,
-                             self._record.quality0])
+            d[1] = np.array([
+                self._record.x0 * conversion_factor, 
+                self._record.y0 * conversion_factor, 
+                self._record.z0 * conversion_factor,
+                self._record.a0, self._record.e0, self._record.r0,
+                self._record.quality0
+            ])
         if 2 in self.attached_sensors:
-            d[2] = np.array([self._record.x1, self._record.y1, self._record.z1,
-                             self._record.a1, self._record.e1, self._record.r1,
-                             self._record.quality1])
+            d[2] = np.array([
+                self._record.x1 * conversion_factor, 
+                self._record.y1 * conversion_factor, 
+                self._record.z1 * conversion_factor,
+                self._record.a1, self._record.e1, self._record.r1,
+                self._record.quality1
+            ])
         if 3 in self.attached_sensors:
-            d[3] = np.array([self._record.x2, self._record.y2, self._record.z2,
-                             self._record.a2, self._record.e2, self._record.r2,
-                             self._record.quality2])
+            d[3] = np.array([
+                self._record.x2 * conversion_factor, 
+                self._record.y2 * conversion_factor, 
+                self._record.z2 * conversion_factor,
+                self._record.a2, self._record.e2, self._record.r2,
+                self._record.quality2
+            ])
         if 4 in self.attached_sensors:
-            d[4] = np.array([self._record.x3, self._record.y3, self._record.z3,
-                             self._record.a3, self._record.e3, self._record.r3,
-                             self._record.quality3])
-
-        #if udp_data is None:
-        #    d["udp"] = ""
-        #else:
-        #    d["udp"] = udp_data
-
+            d[4] = np.array([
+                self._record.x3 * conversion_factor, 
+                self._record.y3 * conversion_factor, 
+                self._record.z3 * conversion_factor,
+                self._record.a3, self._record.e3, self._record.r3,
+                self._record.quality3
+            ])
 
         if self._file is not None and write_data_file:
             self._file.write(data_dict2string(d,
                                angles=self._write_angles,
                                quality=self._write_quality,
-                               #udp=self._write_udp,
                                cpu_times=self._write_cpu_times) + "\n")
 
         return d
@@ -417,3 +455,4 @@ class TrakSTARRecordingThread(threading.Thread):
                 self._lock.release()
             else:
                 self._recording_flag.wait(timeout=0.2)
+

@@ -9,9 +9,19 @@ from trakstar_interface import *  # Replace with your TrakSTARInterface import
 
 
 class ReceiverTracker(QMainWindow):
-    def __init__(self, trakstar):
+    def __init__(self, trakstar, enable_origin_reset=True, use_origin=True):
         super().__init__()
         self.trakstar = trakstar
+        self.enable_origin_reset = enable_origin_reset
+        self.use_origin = use_origin
+
+        # Add reference plane related attributes
+        self.reference_points = []
+        self.collecting_reference = False
+        self.reference_timer = QTimer()
+        self.reference_timer.timeout.connect(self.capture_reference_point)
+        self.transform_matrix = None
+        self.reference_origin = None
 
         # Set up the main window
         self.setWindowTitle("Receiver Position Tracker")
@@ -32,10 +42,16 @@ class ReceiverTracker(QMainWindow):
         self.position_label.setGeometry(10, 10, 300, 30)
         self.position_label.setText("X: 0.0, Y: 0.0, Z: 0.0")
 
-        # Add button to set the reference plane
-        self.set_reference_button = QPushButton("Set Reference Plane", self)
-        self.set_reference_button.clicked.connect(self.start_reference_plane_mode)
-        layout.addWidget(self.set_reference_button)
+        # Add reset origin button only if enabled
+        if self.enable_origin_reset:
+            self.reset_origin_button = QPushButton("Reset Origin", self)
+            self.reset_origin_button.clicked.connect(self.reset_origin)
+            layout.addWidget(self.reset_origin_button)
+
+        # Add reference plane button
+        self.ref_plane_button = QPushButton("Set Reference Plane", self)
+        self.ref_plane_button.clicked.connect(self.start_reference_collection)
+        layout.addWidget(self.ref_plane_button)
 
         # Create the VTK pipeline
         self.renderer = vtk.vtkRenderer()
@@ -86,12 +102,9 @@ class ReceiverTracker(QMainWindow):
         self.timer.timeout.connect(self.update_position)
         self.timer.start(50)
 
-        # Reference plane setup
-        self.reference_plane = None
-        self.reference_timer = QTimer()
-        self.reference_timer.timeout.connect(self.capture_reference_point)
-        self.reference_points = []
-        self.reference_mode = False
+        # Add origin-related attributes
+        self.origin_set = False
+        self.origin = None if self.use_origin else np.array([0, 0, 0])
 
     def create_axes(self, length=10.0):
         """Create coordinate system axes."""
@@ -118,78 +131,116 @@ class ReceiverTracker(QMainWindow):
         widget.EnabledOn()
         widget.InteractiveOn()
 
-    def start_reference_plane_mode(self):
-        """Start setting reference plane."""
-        print("Begin waving on reference plane...")
+    def start_reference_collection(self):
+        """Start collecting reference points."""
         self.reference_points = []
-        self.reference_mode = True
-        self.reference_timer.start(50)
-        QTimer.singleShot(1000, self.finish_reference_plane_mode)
+        self.collecting_reference = True
+        print("Starting reference plane collection...")
+        print("Collecting point 1 of 3...")
+        self.reference_timer.start(1000)  # Timer fires every 1 second
 
     def capture_reference_point(self):
         """Capture reference points."""
-        if self.reference_mode:
-            data = self.trakstar.get_synchronous_data_dict(write_data_file=False)
-            x, y, z = data[1][:3]
-            self.reference_points.append(np.array([x, y, z]))
-
-    def finish_reference_plane_mode(self):
-        """Finish setting reference plane."""
-        self.reference_mode = False
-        self.reference_timer.stop()
         if len(self.reference_points) >= 3:
-            self.reference_plane = self.compute_reference_plane(self.reference_points)
-            print(f"Reference plane set: {self.reference_plane}")
-        else:
-            print("Not enough points for reference plane.")
+            self.reference_timer.stop()
+            self.collecting_reference = False
+            self.create_transform_matrix()
+            return
 
-    def compute_reference_plane(self, points):
-        """Compute reference plane equation."""
-        p1, p2, p3 = points[:3]
-        v1 = p2 - p1
-        v2 = p3 - p1
-        normal = np.cross(v1, v2)
-        a, b, c = normal / np.linalg.norm(normal)
-        d = -np.dot(normal, p1)
-        return np.array([a, b, c, d])
+        data = self.trakstar.get_synchronous_data_dict(write_data_file=False)
+        current_pos = np.array([val * 2.54 for val in data[1][:3]])
+        self.reference_points.append(current_pos)
+        print(f"Collected point {len(self.reference_points)} of 3...")
+        
+        if len(self.reference_points) == 3:
+            self.reference_timer.stop()
+            self.collecting_reference = False
+            self.create_transform_matrix()
 
-    def adjust_to_reference_plane(self, x, y, z):
-        """Adjust a point while preserving Z-movement."""
-        if self.reference_plane is None:
-            return np.array([x, y, z])
-        a, b, c, d = self.reference_plane
-        normal = np.array([a, b, c]) / np.linalg.norm([a, b, c])
-        z_axis = np.array([0, 0, 1])
-        v = np.cross(normal, z_axis)
-        s = np.linalg.norm(v)
-        c = np.dot(normal, z_axis)
-        vx = np.array([
-            [0, -v[2], v[1]],
-            [v[2], 0, -v[0]],
-            [-v[1], v[0], 0]
-        ])
-        rotation_matrix = np.eye(3) + vx + (vx @ vx) * ((1 - c) / (s**2)) if s != 0 else np.eye(3)
-        point = np.array([x, y, z]) - (-d * normal)
-        return rotation_matrix @ point
+    def create_transform_matrix(self):
+        """Create transformation matrix from reference points."""
+        try:
+            p1, p2, p3 = self.reference_points
+
+            # Create vectors from points
+            v1 = p2 - p1  # First vector
+            v2 = p3 - p1  # Second vector
+            
+            # Calculate normal vector (new z-axis)
+            z_new = np.cross(v1, v2)
+            z_new = z_new / np.linalg.norm(z_new)
+            
+            # Calculate new x-axis (using v1 direction)
+            x_new = v1 / np.linalg.norm(v1)
+            
+            # Calculate new y-axis (perpendicular to both z and x)
+            y_new = np.cross(z_new, x_new)
+            
+            # Create rotation matrix
+            self.transform_matrix = np.vstack([x_new, y_new, z_new]).T
+            self.reference_origin = p1
+            
+            print("Reference plane successfully created!")
+            print(f"Origin point: {self.reference_origin}")
+            print(f"Transform matrix:\n{self.transform_matrix}")
+        except Exception as e:
+            print(f"Error creating transform matrix: {e}")
+            self.transform_matrix = None
+            self.reference_origin = None
+
+    def transform_point(self, point):
+        """Transform a point to the reference plane coordinate system."""
+        if self.transform_matrix is None or self.reference_origin is None:
+            return point
+        return self.transform_matrix.T @ (point - self.reference_origin)
 
     def update_position(self):
         """Update position and render."""
-        data = self.trakstar.get_synchronous_data_dict(write_data_file=False)
-        x, y, z = data[1][:3]
-        adjusted_position = self.adjust_to_reference_plane(x, y, z)
-        self.points.SetPoint(0, adjusted_position[0], adjusted_position[1], adjusted_position[2])
+        data = self.trakstar.get_synchronous_data_dict(write_data_file=False, unit="cm")
+        current_pos = np.array(data[1][:3])  # No need for conversion here anymore
+
+        # Set origin if using origin system and not set
+        if self.use_origin and not self.origin_set:
+            self.origin = current_pos
+            self.origin_set = True
+            print("Origin set at:", self.origin)
+            return
+
+        # Calculate position (either relative to origin or absolute)
+        position = current_pos - (self.origin if self.use_origin else np.array([0, 0, 0]))
+        
+        # Transform position to reference plane coordinate system if available
+        if self.transform_matrix is not None:
+            position = self.transform_point(position)
+        
+        # Update display with position
+        self.points.SetPoint(0, position[0], position[1], position[2])
         self.points.Modified()
-        self.position_label.setText(f"X: {adjusted_position[0]:.2f}, Y: {adjusted_position[1]:.2f}, Z: {adjusted_position[2]:.2f}")
+        self.position_label.setText(f"X: {position[0]:.2f}, Y: {position[1]:.2f}, Z: {position[2]:.2f}")
         self.vtk_widget.GetRenderWindow().Render()
+
+    def reset_origin(self):
+        """Reset the origin to the current position."""
+        if not self.enable_origin_reset:
+            return
+        self.origin_set = False
+        self.origin = None
+        print("Origin reset - next position will be new origin")
 
 
 def main():
     trakstar = TrakSTARInterface()
     trakstar.initialize()
     app = QApplication(sys.argv)
-    window = ReceiverTracker(trakstar)
+    
+    # Control both origin functionalities here
+    enable_origin_reset = False  # Controls whether the reset button appears
+    use_origin = False          # Controls whether to use origin system at all
+    
+    window = ReceiverTracker(trakstar, enable_origin_reset, use_origin)
     window.show()
     sys.exit(app.exec())
+
 
 
 if __name__ == '__main__':
